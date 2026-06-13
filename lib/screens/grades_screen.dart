@@ -133,23 +133,121 @@ class _TermCard extends StatefulWidget {
 class _TermCardState extends State<_TermCard> {
   bool _expanded = true;
 
+  static double? _coef(String hbn) {
+    switch (hbn.toUpperCase()) {
+      case 'AA': return 4.00;
+      case 'BA': return 3.50;
+      case 'BB': return 3.00;
+      case 'CB': return 2.50;
+      case 'CC': return 2.00;
+      case 'DC': return 1.50;
+      case 'DD': return 1.00;
+      case 'FD': return 0.50;
+      case 'FF': return 0.00;
+      default: return null;
+    }
+  }
+
+  String _dano() {
+    double weighted = 0;
+    double totalCredits = 0;
+    for (final g in widget.courses) {
+      final coef = _coef(g.letterGrade);
+      if (coef == null) continue;
+      final kred = double.tryParse(
+            g.credits.split('|').first.trim().replaceAll(',', '.')) ?? 0;
+      if (kred <= 0) continue;
+      weighted += kred * coef;
+      totalCredits += kred;
+    }
+    if (totalCredits == 0) return '-';
+    return (weighted / totalCredits).toStringAsFixed(2);
+  }
+
+  Color _danoColor(String dano) {
+    final v = double.tryParse(dano);
+    if (v == null) return Colors.grey;
+    if (v >= 3.0) return const Color(0xFF3AAFA9);
+    if (v >= 2.0) return Colors.orange.shade700;
+    return Colors.red.shade600;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final dano = _dano();
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Column(
         children: [
-          ListTile(
-            title: Text(
-              widget.term.isEmpty ? 'Dönem' : widget.term,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            subtitle: Text('${widget.courses.length} ders'),
-            trailing: IconButton(
-              icon: Icon(_expanded ? Icons.expand_less : Icons.expand_more),
-              onPressed: () => setState(() => _expanded = !_expanded),
-            ),
+          InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.term.isEmpty ? 'Dönem' : widget.term,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${widget.courses.length} ders',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (dano != '-')
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _danoColor(dano).withAlpha(20),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                            color: _danoColor(dano).withAlpha(80)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'DANO ',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: _danoColor(dano),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          Text(
+                            dano,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: _danoColor(dano),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    color: Colors.grey.shade400,
+                  ),
+                ],
+              ),
+            ),
           ),
           if (_expanded)
             ...widget.courses.map((g) => _GradeTile(grade: g)),

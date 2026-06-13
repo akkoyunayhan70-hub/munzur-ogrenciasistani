@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/ubys_service.dart';
 import 'grades_screen.dart';
 import 'calendar_screen.dart';
+import 'hesapla_screen.dart';
 import 'profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -24,6 +25,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _screens = [
       GradesScreen(service: widget.service),
       const CalendarScreen(),
+      HesaplaScreen(service: widget.service),
       ProfileScreen(service: widget.service),
     ];
   }
@@ -51,6 +53,11 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(Icons.calendar_month_outlined),
             selectedIcon: Icon(Icons.calendar_month, color: Color(0xFF3AAFA9)),
             label: 'Takvim',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.calculate_outlined),
+            selectedIcon: Icon(Icons.calculate, color: Color(0xFF3AAFA9)),
+            label: 'Hesapla',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),

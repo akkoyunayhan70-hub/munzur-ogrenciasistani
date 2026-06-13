@@ -3,12 +3,31 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/ubys_service.dart';
 import 'login_screen.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   final UbysService service;
 
   const ProfileScreen({super.key, required this.service});
 
-  Future<void> _logout(BuildContext context) async {
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  @override
+  void initState() {
+    super.initState();
+    widget.service.addListener(_onUpdate);
+  }
+
+  @override
+  void dispose() {
+    widget.service.removeListener(_onUpdate);
+    super.dispose();
+  }
+
+  void _onUpdate() => setState(() {});
+
+  Future<void> _logout() async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -28,12 +47,12 @@ class ProfileScreen extends StatelessWidget {
         ],
       ),
     );
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('saved_username');
     await prefs.remove('saved_password');
-    service.dispose();
-    if (!context.mounted) return;
+    widget.service.dispose();
+    if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -43,8 +62,9 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final info = service.studentInfo;
-    final name = info['Ad Soyad'] ?? '';
+    final info = widget.service.studentInfo;
+    final name = info['__name'] ?? '';
+    final studentNo = info['__no'] ?? '';
     final initials = _initials(name);
 
     return Scaffold(
@@ -88,20 +108,28 @@ class ProfileScreen extends StatelessWidget {
               ),
               const SizedBox(height: 4),
             ],
-            if (info['Öğrenci No'] != null)
+            if (studentNo.isNotEmpty)
               Text(
-                info['Öğrenci No']!,
+                studentNo,
                 style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
               ),
             const SizedBox(height: 28),
-            // Bilgi kartı
-            if (info.isNotEmpty) _InfoCard(info: info),
+            if (info.isNotEmpty)
+              _InfoCard(info: info)
+            else
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  'Bilgiler notlar yüklendikten sonra görünür.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey.shade500, fontSize: 13),
+                ),
+              ),
             const SizedBox(height: 32),
-            // Çıkış butonu
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: () => _logout(context),
+                onPressed: _logout,
                 icon: const Icon(Icons.logout, color: Colors.red),
                 label: const Text(
                   'Çıkış Yap',
@@ -127,7 +155,7 @@ class ProfileScreen extends StatelessWidget {
 
   String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
-    if (parts.isEmpty) return '';
+    if (parts.isEmpty || parts[0].isEmpty) return '';
     if (parts.length == 1) return parts[0][0].toUpperCase();
     return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
@@ -138,22 +166,10 @@ class _InfoCard extends StatelessWidget {
 
   const _InfoCard({required this.info});
 
-  static const _skipInHeader = {'Ad Soyad', 'Öğrenci No'};
-  static const _order = [
-    'Program',
-    'Bölüm',
-    'Fakülte',
-    'Sınıf',
-    'GANO',
-    'Akademik Yıl',
-  ];
-
   @override
   Widget build(BuildContext context) {
-    final keys = [
-      ..._order.where((k) => info.containsKey(k) && !_skipInHeader.contains(k)),
-      ...info.keys.where((k) => !_order.contains(k) && !_skipInHeader.contains(k)),
-    ];
+    // __name ve __no avatar alanında gösterildi, burada tekrar gösterme
+    final keys = info.keys.where((k) => !k.startsWith('__')).toList();
 
     if (keys.isEmpty) return const SizedBox.shrink();
 
@@ -179,11 +195,11 @@ class _InfoCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       SizedBox(
-                        width: 110,
+                        width: 120,
                         child: Text(
                           k,
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: 12,
                             color: Colors.grey.shade500,
                             fontWeight: FontWeight.w500,
                           ),
@@ -193,7 +209,7 @@ class _InfoCard extends StatelessWidget {
                         child: Text(
                           info[k]!,
                           style: const TextStyle(
-                            fontSize: 14,
+                            fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF2B4141),
                           ),

@@ -1,9 +1,10 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:html/parser.dart' as html_parser;
 import '../models/grade.dart';
 import 'ubys_http.dart';
 
-class UbysService {
+class UbysService extends ChangeNotifier {
   static const String _baseUrl = 'https://ubys.munzur.edu.tr';
 
   final _http = UbysHttp();
@@ -76,10 +77,14 @@ class UbysService {
       }
     }
 
-    _log('Dashboard: ${html_parser.parse(pageHtml).querySelector("title")?.text}');
+    final dashDoc = html_parser.parse(pageHtml);
+    _log('Dashboard: ${dashDoc.querySelector("title")?.text}');
 
-    // Base64 JSON'dan EncryptedStudentAcademicProgramId'yi çıkar
+    // Base64 JSON'dan EncryptedStudentAcademicProgramId'yi çıkar (cache'i doldurur)
     final encSapid = _extractEncryptedSapid(pageHtml);
+
+    // Nav bar'dan öğrenci adını çek (JSON'dan sonra çalışır)
+    _extractNameFromDashboard(dashDoc);
     if (encSapid == null) {
       throw Exception(
         'Öğrenci program ID\'si bulunamadı. Lütfen tekrar giriş yapın.',
@@ -93,12 +98,22 @@ class UbysService {
     );
 
     _log('Class sayfası uzunluğu: ${classHtml.length}');
-    return _parseClassIndex(classHtml);
+    final result = _parseClassIndex(classHtml);
+    _gradesCache = result;
+    notifyListeners();
+    return result;
   }
 
   Map<String, String> get studentInfo => Map.unmodifiable(_studentInfoCache);
 
-  void dispose() => _http.dispose();
+  List<Grade> _gradesCache = [];
+  List<Grade> get cachedGrades => List.unmodifiable(_gradesCache);
+
+  @override
+  void dispose() {
+    _http.dispose();
+    super.dispose();
+  }
 
   /// Dashboard HTML'indeki Base64 JSON'dan şifreli sapid'i ve öğrenci bilgisini çıkarır
   String? _extractEncryptedSapid(String html) {
@@ -116,33 +131,98 @@ class UbysService {
     return null;
   }
 
-  void _parseStudentInfoJson(String json) {
-    final info = <String, String>{};
-    final labelMap = {
-      'StudentFullName': 'Ad Soyad',
-      'FullName': 'Ad Soyad',
-      'StudentNo': 'Öğrenci No',
-      'StudentNumber': 'Öğrenci No',
-      'ProgramName': 'Program',
-      'FacultyName': 'Fakülte',
-      'DepartmentName': 'Bölüm',
-      'ClassName': 'Sınıf',
-      'ClassYear': 'Sınıf',
-      'Gano': 'GANO',
-      'AcademicYear': 'Akademik Yıl',
-    };
-    for (final entry in labelMap.entries) {
-      final m = RegExp('"${entry.key}"\\s*:\\s*"([^"]*)"').firstMatch(json);
-      if (m != null && m.group(1)!.isNotEmpty) {
-        info[entry.value] = m.group(1)!;
+  void _parseStudentInfoJson(String rawJson) {
+    try {
+      final decoded = jsonDecode(rawJson);
+      if (decoded is! Map) return;
+      final raw = <String, String>{};
+
+      // Üst seviye alanlar
+      for (final entry in decoded.entries) {
+        final key = entry.key.toString();
+        final val = entry.value;
+        if (val == null) continue;
+        if (val is String && val.isNotEmpty) raw[key] = val;
+        if (val is num) raw[key] = val.toString();
+      }
+
+      // Programs[0] alanları
+      final programs = decoded['Programs'];
+      if (programs is List && programs.isNotEmpty && programs[0] is Map) {
+        for (final entry in (programs[0] as Map).entries) {
+          final key = entry.key.toString();
+          final val = entry.value;
+          if (val == null) continue;
+          if (val is String && val.isNotEmpty) raw['P_$key'] = val;
+          if (val is num) raw['P_$key'] = val.toString();
+        }
+      }
+
+      _log('StudentInfo keys: ${raw.keys.join(', ')}');
+
+      // Sadece işe yarayan alanları Türkçe etiketle sakla
+      final info = <String, String>{};
+
+      // İsim — birden fazla olası anahtar dene
+      final nameKeys = [
+        'FullName', 'StudentFullName', 'Name', 'StudentName',
+        'AdSoyad', 'AdiSoyadi', 'Adi', 'OgrenciAdi',
+      ];
+      for (final k in nameKeys) {
+        if (raw.containsKey(k)) { info['__name'] = raw[k]!; break; }
+      }
+
+      // Öğrenci no
+      final noKeys = ['P_StudentNo'];
+      for (final k in noKeys) {
+        if (raw.containsKey(k)) { info['__no'] = raw[k]!; break; }
+      }
+
+      // Gösterilecek bilgiler
+      _addIf(info, raw, 'Program', ['P_AcademicProgramName']);
+      _addIf(info, raw, 'Bölüm / Fakülte', ['P_UnitName']);
+      _addIf(info, raw, 'Sınıf', ['P_Class'], suffix: '. Sınıf');
+      _addIf(info, raw, 'GANO', ['P_GANO']);
+      _addIf(info, raw, 'Durum', ['P_DetailStatusName']);
+
+      _studentInfoCache = info;
+      notifyListeners();
+    } catch (e) {
+      _log('StudentInfo parse hatası: $e');
+    }
+  }
+
+  void _extractNameFromDashboard(dynamic doc) {
+    // UBYS Munzur: .portal-sub-menu-profile-text içindeki ilk span
+    final profileDiv = doc.querySelector('.portal-sub-menu-profile-text');
+    if (profileDiv != null) {
+      final spans = profileDiv.querySelectorAll('span');
+      if (spans.isNotEmpty) {
+        final text = spans[0].text.trim();
+        if (text.isNotEmpty && text.length > 2) {
+          _log('İsim bulundu: $text');
+          _studentInfoCache = Map.from(_studentInfoCache)..['__name'] = text;
+          notifyListeners();
+          return;
+        }
       }
     }
-    // Sayısal alanlar (GANO gibi)
-    final ganoM = RegExp(r'"Gano"\s*:\s*([\d.]+)').firstMatch(json);
-    if (ganoM != null) info['GANO'] = ganoM.group(1)!;
-    final classM = RegExp(r'"ClassYear"\s*:\s*(\d+)').firstMatch(json);
-    if (classM != null) info['Sınıf'] = '${classM.group(1)}. Sınıf';
-    _studentInfoCache = info;
+    _log('İsim bulunamadi.');
+  }
+
+  void _addIf(
+    Map<String, String> out,
+    Map<String, String> raw,
+    String label,
+    List<String> keys, {
+    String suffix = '',
+  }) {
+    for (final k in keys) {
+      if (raw.containsKey(k) && raw[k]!.isNotEmpty) {
+        out[label] = '${raw[k]!}$suffix';
+        return;
+      }
+    }
   }
 
   /// Dönem adını table id'sinden çıkarır (e.g. "Bahar2025table" → "Bahar 2025")
