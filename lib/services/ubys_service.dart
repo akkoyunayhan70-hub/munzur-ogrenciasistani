@@ -7,6 +7,7 @@ class UbysService {
   static const String _baseUrl = 'https://ubys.munzur.edu.tr';
 
   final _http = UbysHttp();
+  Map<String, String> _studentInfoCache = {};
 
   Future<bool> login(String username, String password) async {
     final loginHtml = await _http.get('/');
@@ -95,14 +96,17 @@ class UbysService {
     return _parseClassIndex(classHtml);
   }
 
+  Map<String, String> get studentInfo => Map.unmodifiable(_studentInfoCache);
+
   void dispose() => _http.dispose();
 
-  /// Dashboard HTML'indeki Base64 JSON'dan şifreli sapid'i çıkarır
+  /// Dashboard HTML'indeki Base64 JSON'dan şifreli sapid'i ve öğrenci bilgisini çıkarır
   String? _extractEncryptedSapid(String html) {
     for (final m in RegExp(r'Base64\.decode\("([^"]+)"\)').allMatches(html)) {
       try {
         final decoded = utf8.decode(base64.decode(m.group(1)!));
         if (!decoded.contains('"Programs"')) continue;
+        _parseStudentInfoJson(decoded);
         final em = RegExp(
           r'"EncryptedStudentAcademicProgramId"\s*:\s*"([^"]+)"',
         ).firstMatch(decoded);
@@ -110,6 +114,35 @@ class UbysService {
       } catch (_) {}
     }
     return null;
+  }
+
+  void _parseStudentInfoJson(String json) {
+    final info = <String, String>{};
+    final labelMap = {
+      'StudentFullName': 'Ad Soyad',
+      'FullName': 'Ad Soyad',
+      'StudentNo': 'Öğrenci No',
+      'StudentNumber': 'Öğrenci No',
+      'ProgramName': 'Program',
+      'FacultyName': 'Fakülte',
+      'DepartmentName': 'Bölüm',
+      'ClassName': 'Sınıf',
+      'ClassYear': 'Sınıf',
+      'Gano': 'GANO',
+      'AcademicYear': 'Akademik Yıl',
+    };
+    for (final entry in labelMap.entries) {
+      final m = RegExp('"${entry.key}"\\s*:\\s*"([^"]*)"').firstMatch(json);
+      if (m != null && m.group(1)!.isNotEmpty) {
+        info[entry.value] = m.group(1)!;
+      }
+    }
+    // Sayısal alanlar (GANO gibi)
+    final ganoM = RegExp(r'"Gano"\s*:\s*([\d.]+)').firstMatch(json);
+    if (ganoM != null) info['GANO'] = ganoM.group(1)!;
+    final classM = RegExp(r'"ClassYear"\s*:\s*(\d+)').firstMatch(json);
+    if (classM != null) info['Sınıf'] = '${classM.group(1)}. Sınıf';
+    _studentInfoCache = info;
   }
 
   /// Dönem adını table id'sinden çıkarır (e.g. "Bahar2025table" → "Bahar 2025")
